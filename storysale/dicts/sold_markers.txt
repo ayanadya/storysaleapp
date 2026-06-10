@@ -1,0 +1,15 @@
+# Tokens (case-insensitive). Emojis count as tokens.
+# If any of these appear in the text, mark the row as sold.
+sold
+sold out
+claimed
+taken
+gone
+pending
+ppu
+on hold
+hold
+reserved
+🔒
+❌
+✅sold

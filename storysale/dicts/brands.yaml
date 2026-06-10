@@ -1,0 +1,110 @@
+# Archive menswear brands. canonical → list of aliases (case-insensitive).
+# Canonical name is auto-matched too; do not repeat it in aliases.
+# Be conservative with 2-letter aliases (they false-positive inside common words).
+
+Raf Simons:
+  - raf
+
+Helmut Lang:
+  - helmut
+  - hl  # historical, watch for false positives
+
+Dior Homme:
+  - dior homme
+
+Number (N)ine:
+  - number nine
+  - number (n)ine
+  - n(n)ine
+  - nnine
+
+Undercover:
+  - undercoverism
+  - ucj
+  - undakovrist
+
+Comme des Garçons:
+  - comme des garcons
+  - cdg
+  - cdg homme
+  - comme des garçons homme
+  - comme des garcons homme
+
+Junya Watanabe:
+  - junya
+  - junya wata
+  - junya watanabe man
+
+Yohji Yamamoto:
+  - yohji
+  - y's
+  - ys
+
+Issey Miyake:
+  - issey
+  - miyake
+  - im men
+  - hai sporting gear
+  - homme plisse
+  - homme plissé
+
+Carol Christian Poell:
+  - ccp
+  - poell
+
+Boris Bidjan Saberi:
+  - bbs
+  - boris bidjan
+
+m.a+:
+  - ma+
+  - ma plus
+  - maplus
+  - m.a plus
+
+A1923 (A Diciannoveventitre):
+  - a1923
+  - diciannoveventitre
+  - a diciannoveventitre
+
+Label Under Construction:
+  - luc
+
+Guidi: []
+
+Julius_7:
+  - julius
+  - j7
+
+Rick Owens:
+  - rick
+  - drkshdw
+  - rick owens drkshdw
+  - dark shadow
+
+Maison Margiela:
+  - mm6
+  - maison martin margiela
+  - margiela
+  - mmm
+
+Ann Demeulemeester:
+  - ann d
+  - demeulemeester
+
+Veronique Branquinho:
+  - branquinho
+
+Jean Paul Gaultier:
+  - jpg
+  - gaultier
+  - jpg homme
+
+Vivienne Westwood:
+  - westwood
+  - viv westwood
+  - vivienne
+
+Alexander McQueen:
+  - mcqueen
+  - mcq

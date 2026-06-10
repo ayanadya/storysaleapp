@@ -1,0 +1,29 @@
+# Positive sale-language signals for STORY pipeline only.
+# Story counts as sale-positive if it contains any of these
+# (or a price indicator — see story_signal.py for that logic).
+sale
+story sale
+storysale
+selling
+for sale
+on sale
+sale alert
+fire sale
+flash sale
+clearance
+moving sale
+closet clean
+closet cleanout
+clean out
+clean-out
+shop sale
+drop
+restock
+available
+in stock
+back in stock
+grail
+grails
+take it home
+yours for
+make it yours

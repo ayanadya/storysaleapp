@@ -1,0 +1,13 @@
+# Runtime
+instagrapi>=2.8
+instaloader>=4.13     # legacy fallback only; primary is instagrapi
+easyocr>=1.7
+Pillow>=10.0
+PyYAML>=6.0
+python-dotenv>=1.0
+
+# UI (not used yet, listed for completeness)
+streamlit>=1.30
+
+# Dev
+pytest>=8.0

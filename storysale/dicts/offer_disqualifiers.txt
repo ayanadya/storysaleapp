@@ -1,0 +1,26 @@
+# Disqualifying signals for STORY pipeline. If any of these appear, the story
+# is NOT counted as an active sale — even if it has sale language or a price.
+# Logic: an offer thread is not the same as a fixed-price sale.
+h/o
+ho
+highest offer
+highest offers
+co
+c/o
+current offer
+current offers
+take offers
+taking offers
+best offer
+best offers
+bo
+b/o
+offers welcome
+accepting offers
+dm offers
+dm offer
+make an offer
+make offer
+auction
+bid
+bidding

@@ -1,0 +1,89 @@
+# Menswear / unisex clothing terms used by the POST SEARCH pipeline.
+# Lowercase, one per line. Lines starting with # are ignored.
+# Story-sale detection does NOT use this dict.
+
+# Tops
+tee
+t-shirt
+tshirt
+tank
+tank top
+shirt
+button up
+button-up
+button down
+button-down
+polo
+cardigan
+sweater
+jumper
+pullover
+hoodie
+sweatshirt
+zip up
+zip-up
+turtleneck
+knit
+mock neck
+
+# Bottoms
+pants
+trousers
+jeans
+shorts
+joggers
+sweatpants
+chinos
+slacks
+cargos
+cargo pants
+
+# Outerwear
+jacket
+coat
+blazer
+puffer
+trench
+trench coat
+windbreaker
+denim jacket
+leather jacket
+bomber
+vest
+parka
+peacoat
+overcoat
+duster
+duster coat
+
+# Footwear
+shoes
+sneakers
+trainers
+boots
+chelsea boots
+combat boots
+sandals
+loafers
+derbies
+oxfords
+clogs
+runners
+
+# Bags / accessories
+bag
+backpack
+tote
+messenger bag
+belt
+scarf
+hat
+beanie
+cap
+sunglasses
+gloves
+wallet
+ring
+bracelet
+necklace
+earrings
