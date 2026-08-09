@@ -17,7 +17,13 @@
 
 [CmdletBinding()]
 param(
-    [string]$ProjectPath = 'C:\storysaleapp'
+    [string]$ProjectPath = 'C:\storysaleapp',
+
+    # Which Python builds the venv. Pinned rather than "whatever `python`
+    # resolves to" because PyTorch CUDA wheels lag new CPython releases by
+    # months — a 3.14 venv will fail at the torch install step with an
+    # unhelpful "no matching distribution" error.
+    [string]$PythonVersion = '3.12'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,17 +43,39 @@ function Fail($msg) { Write-Host "  [FAIL] $msg" -ForegroundColor Red; throw $ms
 # ----------------------------------------------------------------
 Step 'Prerequisite checks'
 
-foreach ($tool in 'python','git','nvidia-smi','tailscale') {
+foreach ($tool in 'git','nvidia-smi','tailscale') {
     $cmd = Get-Command $tool -ErrorAction SilentlyContinue
     if (-not $cmd) { Fail "$tool not found in PATH. Install it before running this script." }
     OK "$tool found at $($cmd.Source)"
 }
 
-# Python version
-$pyVer = (& python --version 2>&1).ToString() -replace '^Python ',''
+# Resolve the interpreter that will build the venv. Prefer `py -<version>`
+# (the launcher can pick a non-default install); fall back to bare `python`.
+$BootstrapPython = $null
+if (Get-Command 'py' -ErrorAction SilentlyContinue) {
+    & py "-$PythonVersion" --version *> $null
+    if ($LASTEXITCODE -eq 0) {
+        $BootstrapPython = @('py', "-$PythonVersion")
+        OK "Using py -$PythonVersion to build the venv"
+    } else {
+        Warn "py -$PythonVersion not available (install it with: py install $PythonVersion)"
+    }
+}
+if (-not $BootstrapPython) {
+    $cmd = Get-Command 'python' -ErrorAction SilentlyContinue
+    if (-not $cmd) { Fail "Neither 'py -$PythonVersion' nor 'python' found. Install Python $PythonVersion and re-run." }
+    $BootstrapPython = @('python')
+    Warn "Falling back to bare 'python' at $($cmd.Source)"
+}
+
+$pyVer = (& $BootstrapPython[0] $BootstrapPython[1..($BootstrapPython.Count-1)] --version 2>&1).ToString() -replace '^Python ',''
 $maj,$min = $pyVer.Split('.')[0..1] | ForEach-Object { [int]$_ }
 if ($maj -lt 3 -or ($maj -eq 3 -and $min -lt 10)) {
     Fail "Python $pyVer is too old. Install 3.10+ and re-run."
+}
+if ($maj -eq 3 -and $min -gt 13) {
+    Warn "Python $pyVer is newer than the last version with reliable PyTorch CUDA wheels (3.13)."
+    Warn "If the PyTorch step fails, run: py install $PythonVersion   then delete .venv and re-run this script."
 }
 OK "Python $pyVer"
 
@@ -72,10 +100,15 @@ OK "Working in $ProjectPath"
 Step 'Python venv'
 
 if (-not (Test-Path '.venv\Scripts\python.exe')) {
-    & python -m venv .venv
-    OK 'Created .venv'
+    & $BootstrapPython[0] $BootstrapPython[1..($BootstrapPython.Count-1)] -m venv .venv
+    OK "Created .venv from Python $pyVer"
 } else {
-    OK '.venv already exists'
+    $existing = (& '.venv\Scripts\python.exe' --version 2>&1).ToString() -replace '^Python ',''
+    OK ".venv already exists (Python $existing)"
+    if ($existing.Split('.')[0..1] -join '.' -ne $pyVer.Split('.')[0..1] -join '.') {
+        Warn "Existing .venv is Python $existing but you asked for $pyVer."
+        Warn "To rebuild: Remove-Item -Recurse -Force .venv   then re-run this script."
+    }
 }
 $py = "$ProjectPath\.venv\Scripts\python.exe"
 
