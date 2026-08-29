@@ -49,6 +49,34 @@ function OK($msg)   { Write-Host "  [OK]   $msg" -ForegroundColor Green }
 function Warn($msg) { Write-Host "  [WARN] $msg" -ForegroundColor Yellow }
 function Fail($msg) { Write-Host "  [FAIL] $msg" -ForegroundColor Red; throw $msg }
 
+function Invoke-Native {
+    # Run a native exe and return its combined output as a trimmed string,
+    # setting $script:NativeExitCode. Never throws.
+    #
+    # Windows PowerShell 5.1 turns anything a native command writes to stderr
+    # into NativeCommandError records. Under $ErrorActionPreference = 'Stop'
+    # those are terminating, so a probe whose failure is a normal outcome -
+    # "is torch installed yet?" on a fresh venv - would abort the whole script.
+    param(
+        [Parameter(Mandatory)][string]$Exe,
+        [string[]]$Arguments = @()
+    )
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $script:NativeExitCode = 0
+    try {
+        $global:LASTEXITCODE = 0
+        $out = & $Exe @Arguments 2>&1
+        $script:NativeExitCode = $LASTEXITCODE
+    } catch {
+        $out = $_.Exception.Message
+        $script:NativeExitCode = 1
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    return (($out | Out-String).Trim())
+}
+
 # ----------------------------------------------------------------
 # 0. Prerequisite checks
 # ----------------------------------------------------------------
@@ -62,24 +90,32 @@ foreach ($tool in 'git','nvidia-smi','tailscale') {
 
 # Resolve the interpreter that will build the venv. Prefer `py -<version>`
 # (the launcher can pick a non-default install); fall back to bare `python`.
-$BootstrapPython = $null
+$BootstrapExe = $null
+$BootstrapArgs = @()
 if (Get-Command 'py' -ErrorAction SilentlyContinue) {
-    & py "-$PythonVersion" --version *> $null
-    if ($LASTEXITCODE -eq 0) {
-        $BootstrapPython = @('py', "-$PythonVersion")
+    Invoke-Native 'py' @("-$PythonVersion", '--version') | Out-Null
+    if ($NativeExitCode -eq 0) {
+        $BootstrapExe = 'py'
+        $BootstrapArgs = @("-$PythonVersion")
         OK "Using py -$PythonVersion to build the venv"
     } else {
         Warn "py -$PythonVersion not available (install it with: py install $PythonVersion)"
     }
 }
-if (-not $BootstrapPython) {
+if (-not $BootstrapExe) {
     $cmd = Get-Command 'python' -ErrorAction SilentlyContinue
     if (-not $cmd) { Fail "Neither 'py -$PythonVersion' nor 'python' found. Install Python $PythonVersion and re-run." }
-    $BootstrapPython = @('python')
+    $BootstrapExe = 'python'
     Warn "Falling back to bare 'python' at $($cmd.Source)"
 }
 
-$pyVer = (& $BootstrapPython[0] $BootstrapPython[1..($BootstrapPython.Count-1)] --version 2>&1).ToString() -replace '^Python ',''
+# NOTE: an earlier version passed the interpreter as one array and indexed it
+# with [1..($n-1)]. On a 1-element array that is 1..0, which PowerShell treats
+# as a DESCENDING range and expands to a stray $null argument. Keeping the exe
+# and its args in separate variables avoids the whole class of bug.
+$pyVerRaw = Invoke-Native $BootstrapExe ($BootstrapArgs + '--version')
+if ($NativeExitCode -ne 0) { Fail "Could not run the bootstrap Python: $pyVerRaw" }
+$pyVer = $pyVerRaw -replace '^Python ',''
 $maj,$min = $pyVer.Split('.')[0..1] | ForEach-Object { [int]$_ }
 if ($maj -lt 3 -or ($maj -eq 3 -and $min -lt 10)) {
     Fail "Python $pyVer is too old. Install 3.10+ and re-run."
@@ -91,7 +127,8 @@ if ($maj -eq 3 -and $min -gt 13) {
 OK "Python $pyVer"
 
 # GPU check
-$gpu = (& nvidia-smi -L 2>&1) -join ' '
+$gpu = Invoke-Native 'nvidia-smi' @('-L')
+if ($NativeExitCode -ne 0) { Fail "nvidia-smi failed - is the NVIDIA driver installed? Output: $gpu" }
 OK "GPU: $gpu"
 
 # ----------------------------------------------------------------
@@ -111,10 +148,11 @@ OK "Working in $ProjectPath"
 Step 'Python venv'
 
 if (-not (Test-Path '.venv\Scripts\python.exe')) {
-    & $BootstrapPython[0] $BootstrapPython[1..($BootstrapPython.Count-1)] -m venv .venv
+    $venvOut = Invoke-Native $BootstrapExe ($BootstrapArgs + @('-m', 'venv', '.venv'))
+    if ($NativeExitCode -ne 0) { Fail "venv creation failed: $venvOut" }
     OK "Created .venv from Python $pyVer"
 } else {
-    $existing = (& '.venv\Scripts\python.exe' --version 2>&1).ToString() -replace '^Python ',''
+    $existing = (Invoke-Native '.venv\Scripts\python.exe' @('--version')) -replace '^Python ',''
     OK ".venv already exists (Python $existing)"
     if ($existing.Split('.')[0..1] -join '.' -ne $pyVer.Split('.')[0..1] -join '.') {
         Warn "Existing .venv is Python $existing but you asked for $pyVer."
@@ -123,7 +161,8 @@ if (-not (Test-Path '.venv\Scripts\python.exe')) {
 }
 $py = "$ProjectPath\.venv\Scripts\python.exe"
 
-& $py -m pip install --upgrade pip --quiet
+$pipOut = Invoke-Native $py @('-m', 'pip', 'install', '--upgrade', 'pip', '--quiet')
+if ($NativeExitCode -ne 0) { Fail "pip upgrade failed: $pipOut" }
 OK 'pip upgraded'
 
 # ----------------------------------------------------------------
@@ -131,19 +170,32 @@ OK 'pip upgraded'
 # ----------------------------------------------------------------
 Step 'PyTorch + CUDA'
 
-$cudaAvail = (& $py -c "import torch; print(torch.cuda.is_available())" 2>$null).Trim()
-if ($cudaAvail -eq 'True') {
-    $dev = (& $py -c "import torch; print(torch.cuda.get_device_name(0))").Trim()
+# A traceback here is the normal "not installed yet" answer on a fresh venv,
+# not an error - hence Invoke-Native rather than a bare call.
+$cudaAvail = Invoke-Native $py @('-c', 'import torch; print(torch.cuda.is_available())')
+if ($NativeExitCode -eq 0 -and $cudaAvail -eq 'True') {
+    $dev = Invoke-Native $py @('-c', 'import torch; print(torch.cuda.get_device_name(0))')
     OK "PyTorch already installed with working CUDA - device: $dev"
 } else {
+    if ($NativeExitCode -ne 0) {
+        OK 'PyTorch not installed yet'
+    } else {
+        Warn 'PyTorch present but CUDA unavailable - reinstalling the CUDA build'
+    }
     Warn 'Installing PyTorch CUDA 12.1 build - ~2.5 GB download, takes a few minutes'
-    & $py -m pip uninstall -y torch torchvision 2>$null | Out-Null
+    Invoke-Native $py @('-m', 'pip', 'uninstall', '-y', 'torch', 'torchvision') | Out-Null
+
+    # Deliberately a bare call: this should stream progress to the console so
+    # a multi-minute download does not look like a hang.
     & $py -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-    $cudaAvail = (& $py -c "import torch; print(torch.cuda.is_available())").Trim()
+    if ($LASTEXITCODE -ne 0) { Fail "pip install torch failed with exit code $LASTEXITCODE" }
+
+    $cudaAvail = Invoke-Native $py @('-c', 'import torch; print(torch.cuda.is_available())')
+    if ($NativeExitCode -ne 0) { Fail "torch installed but will not import: $cudaAvail" }
     if ($cudaAvail -ne 'True') {
         Fail 'PyTorch installed but torch.cuda.is_available() == False. Driver mismatch - reinstall NVIDIA driver and try again.'
     }
-    $dev = (& $py -c "import torch; print(torch.cuda.get_device_name(0))").Trim()
+    $dev = Invoke-Native $py @('-c', 'import torch; print(torch.cuda.get_device_name(0))')
     OK "CUDA confirmed - device: $dev"
 }
 
@@ -153,6 +205,7 @@ if ($cudaAvail -eq 'True') {
 Step 'Project requirements'
 
 & $py -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) { Fail "pip install -r requirements.txt failed with exit code $LASTEXITCODE" }
 OK 'requirements.txt installed'
 
 # ----------------------------------------------------------------
