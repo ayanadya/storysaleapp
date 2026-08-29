@@ -1,4 +1,4 @@
-<#
+﻿<#
     StorySale server-side setup script.
     Run from an elevated PowerShell on the target server:
         Set-ExecutionPolicy -Scope Process Bypass
@@ -21,13 +21,13 @@ param(
 
     # Which Python builds the venv. Pinned rather than "whatever `python`
     # resolves to" because PyTorch CUDA wheels lag new CPython releases by
-    # months — a 3.14 venv will fail at the torch install step with an
+    # months - a 3.14 venv will fail at the torch install step with an
     # unhelpful "no matching distribution" error.
     [string]$PythonVersion = '3.12',
 
     # Accounts scraped per run. Steady-state target is ~56 (2k accounts / 18h
     # at a 30-min interval), but start LOW on a fresh or recently-locked IG
-    # account and ramp up over a week or two — a brand-new account making
+    # account and ramp up over a week or two - a brand-new account making
     # hundreds of API calls a day is the signature IG's automation detection
     # looks for.
     [int]$BatchSize = 56,
@@ -134,17 +134,17 @@ Step 'PyTorch + CUDA'
 $cudaAvail = (& $py -c "import torch; print(torch.cuda.is_available())" 2>$null).Trim()
 if ($cudaAvail -eq 'True') {
     $dev = (& $py -c "import torch; print(torch.cuda.get_device_name(0))").Trim()
-    OK "PyTorch already installed with working CUDA — device: $dev"
+    OK "PyTorch already installed with working CUDA - device: $dev"
 } else {
-    Warn 'Installing PyTorch CUDA 12.1 build — ~2.5 GB download, takes a few minutes'
+    Warn 'Installing PyTorch CUDA 12.1 build - ~2.5 GB download, takes a few minutes'
     & $py -m pip uninstall -y torch torchvision 2>$null | Out-Null
     & $py -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
     $cudaAvail = (& $py -c "import torch; print(torch.cuda.is_available())").Trim()
     if ($cudaAvail -ne 'True') {
-        Fail 'PyTorch installed but torch.cuda.is_available() == False. Driver mismatch — reinstall NVIDIA driver and try again.'
+        Fail 'PyTorch installed but torch.cuda.is_available() == False. Driver mismatch - reinstall NVIDIA driver and try again.'
     }
     $dev = (& $py -c "import torch; print(torch.cuda.get_device_name(0))").Trim()
-    OK "CUDA confirmed — device: $dev"
+    OK "CUDA confirmed - device: $dev"
 }
 
 # ----------------------------------------------------------------
@@ -169,13 +169,13 @@ $haveSession = Test-Path 'secrets\instagrapi-session.json'
 if (-not $haveSession) {
     Warn 'No instagrapi session file. After this script finishes, run:'
     Warn "  $py -m storysale.cli login"
-    Warn '(May trigger an IG new-device email — confirm it on your phone.)'
+    Warn '(May trigger an IG new-device email - confirm it on your phone.)'
 } else {
     OK 'instagrapi session present'
 }
 
 # ----------------------------------------------------------------
-# 6. Power settings — never sleep while plugged in
+# 6. Power settings - never sleep while plugged in
 # ----------------------------------------------------------------
 Step 'Power settings'
 
@@ -193,7 +193,7 @@ try {
     Add-MpPreference -ExclusionPath $ProjectPath -ErrorAction Stop
     OK "Excluded $ProjectPath from Defender real-time scans"
 } catch {
-    Warn "Defender exclusion failed: $($_.Exception.Message) — not fatal"
+    Warn "Defender exclusion failed: $($_.Exception.Message) - not fatal"
 }
 
 # ----------------------------------------------------------------
@@ -260,9 +260,9 @@ Step 'Validation'
 if ($haveSession) {
     & $py -m storysale.cli diagnose
     if ($LASTEXITCODE -eq 0) { OK 'diagnose: session is alive' }
-    else { Warn 'diagnose returned non-zero — check output above' }
+    else { Warn 'diagnose returned non-zero - check output above' }
 } else {
-    Warn 'Skipped diagnose — no session yet'
+    Warn 'Skipped diagnose - no session yet'
 }
 
 # Start the UI now so we don't wait for a reboot
