@@ -67,6 +67,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if "duplicate column name" not in str(e).lower():
                 raise
 
+    # Small key/value table for scraper bookkeeping that doesn't belong on a
+    # domain table (e.g. when we last synced the followee list).
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
+
     # Indexes that depend on migrated columns. Safe to CREATE IF NOT EXISTS
     # after the ALTERs have landed.
     conn.execute("CREATE INDEX IF NOT EXISTS idx_account_last_scraped ON account(enabled, last_scraped_at)")
@@ -210,6 +216,20 @@ def sweep_retention(conn: sqlite3.Connection, *, now: Optional[int] = None) -> d
     seen: set[str] = set()
     unique_thumbs = [p for p in thumbs_to_delete if not (p in seen or seen.add(p))]
     return {"rows_deleted": rows_deleted, "thumbs_to_delete": unique_thumbs}
+
+
+def get_meta(conn: sqlite3.Connection, key: str) -> Optional[str]:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()
 
 
 def list_accounts(conn: sqlite3.Connection) -> list[str]:

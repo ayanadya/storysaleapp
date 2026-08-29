@@ -16,6 +16,7 @@ import argparse
 import getpass
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -38,14 +39,23 @@ def _open_db(db_path: Path):
 # ---------- commands ----------
 
 def cmd_login(args: argparse.Namespace) -> int:
-    from .ingest import auth  # lazy — pulls in instaloader
+    from .ingest import auth  # lazy — pulls in the IG client libs
     username = args.username or config.IG_USERNAME
     if not username:
         print("error: --username required (or set IG_USERNAME in .env)", file=sys.stderr)
         return 2
     password = config.IG_PASSWORD or getpass.getpass(f"Instagram password for {username}: ")
+
+    if args.source == "instagrapi":
+        # Must match the backend `scrape` uses, or login writes a session file
+        # the scraper never reads and the next scrape does a second, redundant
+        # login — extra IG auth traffic is exactly what gets accounts locked.
+        auth.ensure_instagrapi_session(username, password)
+        print(f"Saved instagrapi session to {auth.INSTAGRAPI_SESSION_PATH}")
+        return 0
+
     auth.interactive_login(username, password, path=Path(args.session))
-    print(f"Saved session to {args.session}")
+    print(f"Saved instaloader session to {args.session}")
     return 0
 
 
@@ -80,11 +90,12 @@ def cmd_scrape(args: argparse.Namespace) -> int:
             # Best-effort: a failure here (IG soft-blocking the /graphql endpoint
             # that own_profile uses) should NOT prevent the actual post/story
             # scrape from running, since those use different endpoints.
-            if not args.no_sync_follows:
+            if not args.no_sync_follows and _followee_sync_due(conn, args.sync_follows_every_hours):
                 try:
                     added = _sync_followees(conn, source)
                     if added:
                         print(f"synced {added} new followed account(s) into the scrape list")
+                    repo.set_meta(conn, _FOLLOWEE_SYNC_KEY, str(int(time.time())))
                 except Exception as e:
                     print(f"warn: followee sync skipped ({type(e).__name__}: {e})", file=sys.stderr)
             accounts = None      # → repo.list_accounts(conn)
@@ -300,6 +311,29 @@ def _build_source_and_ocr(args: argparse.Namespace):
     return InstaloaderSource(loader), read_image_bytes
 
 
+_FOLLOWEE_SYNC_KEY = "last_followee_sync"
+
+
+def _followee_sync_due(conn, every_hours: float) -> bool:
+    """Followee lists change maybe once a day, but pulling one costs several
+    API calls. On a 30-min cron that is hundreds of wasted calls daily — real
+    budget on an account IG is already watching. So only re-sync when the last
+    one is older than `every_hours` (0 = every run)."""
+    if every_hours <= 0:
+        return True
+    last = repo.get_meta(conn, _FOLLOWEE_SYNC_KEY)
+    if not last:
+        log.info("sync: no previous followee sync recorded, syncing now")
+        return True
+    age = int(time.time()) - int(last)
+    if age >= every_hours * 3600:
+        log.info("sync: last followee sync was %.1fh ago, syncing now", age / 3600)
+        return True
+    log.info("sync: last followee sync was %.1fh ago (< %sh), skipping",
+             age / 3600, every_hours)
+    return False
+
+
 def _sync_followees(conn, source) -> int:
     """Add every account the authenticated burner follows to the local account
     table. Returns the number of newly-added rows. Silently no-ops if the source
@@ -332,7 +366,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_login = sub.add_parser("login", help="interactive one-time login; pickles session")
     p_login.add_argument("--username", default=None, help="defaults to IG_USERNAME from .env")
-    p_login.add_argument("--session", default=DEFAULT_SESSION)
+    p_login.add_argument("--session", default=DEFAULT_SESSION,
+                         help="instaloader session path (ignored for --source instagrapi)")
+    p_login.add_argument("--source", choices=("instagrapi", "instaloader"), default="instagrapi",
+                         help="which backend's session to create; must match what scrape uses")
     p_login.set_defaults(func=cmd_login)
 
     p_acc = sub.add_parser("accounts")
@@ -350,6 +387,9 @@ def build_parser() -> argparse.ArgumentParser:
                           help="which flow to run; default both")
     p_scrape.add_argument("--no-sync-follows", action="store_true",
                           help="skip pulling the burner's IG followees into the scrape list")
+    p_scrape.add_argument("--sync-follows-every-hours", type=float, default=24.0,
+                          help="only re-pull the followee list this often (default 24h; "
+                               "0 = every run). New follows appear within this window.")
     p_scrape.add_argument("--source", choices=("instagrapi", "instaloader"), default="instagrapi",
                           help="IG backend; default instagrapi (instaloader is kept for fallback only)")
     # --batch-size is the new name; --max-accounts kept as an alias so existing
