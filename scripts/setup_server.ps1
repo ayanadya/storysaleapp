@@ -23,7 +23,18 @@ param(
     # resolves to" because PyTorch CUDA wheels lag new CPython releases by
     # months — a 3.14 venv will fail at the torch install step with an
     # unhelpful "no matching distribution" error.
-    [string]$PythonVersion = '3.12'
+    [string]$PythonVersion = '3.12',
+
+    # Accounts scraped per run. Steady-state target is ~56 (2k accounts / 18h
+    # at a 30-min interval), but start LOW on a fresh or recently-locked IG
+    # account and ramp up over a week or two — a brand-new account making
+    # hundreds of API calls a day is the signature IG's automation detection
+    # looks for.
+    [int]$BatchSize = 56,
+
+    # Minutes between scrape runs. Full-cycle time = (total accounts /
+    # BatchSize) * this interval.
+    [int]$ScrapeIntervalMinutes = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -202,7 +213,7 @@ if (-not (Get-NetFirewallRule -DisplayName 'StorySale UI 8501' -ErrorAction Sile
 # ----------------------------------------------------------------
 # 9. Scheduled tasks
 # ----------------------------------------------------------------
-Step 'Scheduled tasks: scrape every 30 min + Streamlit at startup'
+Step "Scheduled tasks: scrape every $ScrapeIntervalMinutes min + Streamlit at startup"
 
 $user = "$env:USERDOMAIN\$env:USERNAME"
 $streamlit = "$ProjectPath\.venv\Scripts\streamlit.exe"
@@ -213,19 +224,19 @@ Get-ScheduledTask -TaskName 'StorySale Scrape','StorySale UI' -ErrorAction Silen
 
 # --- Scrape task ---
 $scrapeAction = New-ScheduledTaskAction -Execute $py `
-    -Argument '-m storysale.cli scrape --batch-size 56' `
+    -Argument "-m storysale.cli scrape --batch-size $BatchSize" `
     -WorkingDirectory $ProjectPath
 $scrapeTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
-    -RepetitionInterval (New-TimeSpan -Minutes 30)
+    -RepetitionInterval (New-TimeSpan -Minutes $ScrapeIntervalMinutes)
 $scrapeSettings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -StartWhenAvailable -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 1) `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 25)
+    -ExecutionTimeLimit (New-TimeSpan -Minutes ([Math]::Max(5, $ScrapeIntervalMinutes - 5)))
 Register-ScheduledTask -TaskName 'StorySale Scrape' `
     -Action $scrapeAction -Trigger $scrapeTrigger -Settings $scrapeSettings `
     -User $user -RunLevel Highest `
-    -Description 'Scrape IG every 30 min' | Out-Null
-OK 'Task created: StorySale Scrape (every 30 min, max 25 min runtime)'
+    -Description "Scrape IG: $BatchSize accounts every $ScrapeIntervalMinutes min" | Out-Null
+OK "Task created: StorySale Scrape (--batch-size $BatchSize every $ScrapeIntervalMinutes min)"
 
 # --- UI task ---
 $uiAction = New-ScheduledTaskAction -Execute $streamlit `
